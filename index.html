@@ -579,6 +579,32 @@ function crestSvg(name, size){
   return svg;
 }
 
+/* ---------- flicker-free updates: patch only what changed ---------- */
+function syncAttrs(a, b){
+  for (const at of [...a.attributes]) if (!b.hasAttribute(at.name)) a.removeAttribute(at.name);
+  for (const at of [...b.attributes]) if (a.getAttribute(at.name) !== at.value) a.setAttribute(at.name, at.value);
+}
+function morph(a, b, depth){
+  const ac = [...a.childNodes], bc = [...b.childNodes];
+  if (ac.length !== bc.length || depth > 7){ a.replaceChildren(...bc); return; }
+  for (let i = 0; i < ac.length; i++){
+    const x = ac[i], y = bc[i];
+    if (x.nodeType !== y.nodeType || x.nodeName !== y.nodeName){ a.replaceChild(y, x); continue; }
+    if (x.nodeType === 3 || x.nodeType === 8){ if (x.nodeValue !== y.nodeValue) x.nodeValue = y.nodeValue; continue; }
+    if (x.nodeType !== 1 || x.isEqualNode(y)) continue;
+    if (x.nodeName === "IMG" || x.nodeName === "image" || x.nodeName === "INPUT"){ if (x.nodeName === "INPUT" && document.activeElement === x) continue; syncAttrs(x, y); continue; }
+    syncAttrs(x, y); morph(x, y, depth + 1);
+  }
+}
+function patch(el, html){
+  if (!el) return;
+  if (el.__last === html) return;
+  el.__last = html;
+  if (!el.firstChild){ el.innerHTML = html; return; }
+  const t = document.createElement("template"); t.innerHTML = html;
+  morph(el, t.content, 0);
+}
+Object.defineProperty(Element.prototype, "__html", { set(v){ patch(this, v); }, configurable: true });
 /* ---------- image packs (crests + player photos supplied by the owner) ---------- */
 let CR = null, PL = null, LG = null;
 const blobCache = {};
@@ -670,7 +696,7 @@ function renderDays(){
     const k = shiftDay(t,i), d = new Date(k+"T12:00:00Z");
     h += `<button class="day" data-day="${k}" aria-pressed="${k===S.date}"><small>${esc(dayLabel(k))}</small><b>${String(d.getUTCDate()).padStart(2,"0")}.${String(d.getUTCMonth()+1).padStart(2,"0")}</b></button>`;
   }
-  $("#days").innerHTML = h;
+  $("#days").__html = h;
   const on = $("#days [aria-pressed=\"true\"]"); if (on && renderDays.last !== S.date){ renderDays.last = S.date; on.scrollIntoView({block:"nearest", inline:"center", behavior:"auto"}); }
 }
 function renderTicker(){
@@ -680,7 +706,7 @@ function renderTicker(){
   tk.hidden = false;
   const one = live.map(m => `<span class="tk">${leagueLogo(m.compKey,16)}${crest(m.home,16)}<span>${esc(m.home)}</span><b>${m.hs ?? 0} - ${m.as ?? 0}</b><span>${esc(m.away)}</span>${crest(m.away,16)}<span class="m">${esc(liveClock(m).txt)}</span></span>`).join("");
   const reps = live.length < 4 ? 3 : 1;
-  $("#track").innerHTML = (one.repeat(reps)) + (one.repeat(reps));
+  $("#track").__html = (one.repeat(reps)) + (one.repeat(reps));
   $("#track").style.animationDuration = Math.max(20, live.length*reps*7) + "s";
 }
 
@@ -688,8 +714,8 @@ function renderTicker(){
 function renderStrip(){
   const box = $("#strip-box");
   const live = S.matches.filter(m => effStatus(m)==="live").sort((a,b)=>Date.parse(a.kickoff)-Date.parse(b.kickoff));
-  if (!live.length || S.view !== "jogos"){ box.innerHTML = ""; return; }
-  box.innerHTML = `<div class="strip-h"><span class="pulse"></span><h2>Rolando agora</h2><span class="mono" style="font-size:11px;color:var(--muted)">${live.length} jogo${live.length>1?"s":""}</span><span class="line"></span></div>
+  if (!live.length || S.view !== "jogos"){ box.__html = ""; return; }
+  box.__html = `<div class="strip-h"><span class="pulse"></span><h2>Rolando agora</h2><span class="mono" style="font-size:11px;color:var(--muted)">${live.length} jogo${live.length>1?"s":""}</span><span class="line"></span></div>
   <div class="strip">${live.map((m,i)=>{ const c = liveClock(m); return `<div class="lc" role="button" tabindex="0" data-id="${esc(m.id)}" style="animation-delay:${i*60}ms" aria-label="${esc(m.home)} ${m.hs} a ${m.as} ${esc(m.away)}">
     <div class="top"><span class="cn">${leagueLogo(m.compKey, 18)}${esc(m.comp)}</span><span class="m">● ${esc(c.txt)}</span></div>
     <div class="vs"><div class="tm">${crest(m.home,40)}<span>${esc(m.home)}</span></div><div class="sc">${m.hs ?? 0}<span style="color:var(--dim)">:</span>${m.as ?? 0}</div><div class="tm">${crest(m.away,40)}<span>${esc(m.away)}</span></div></div>
@@ -728,11 +754,11 @@ const STAR = `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2.8l2.8 
 function renderList(){
   counts(); renderStrip(); renderTicker();
   const list = $("#list");
-  if (S.dbState==="off"){ list.innerHTML = `<div class="empty"><h3>Sem conexão com os dados</h3><p>Abra esta página no claude.ai, com sua conta, para ver os placares salvos pela automação.</p></div>`; return; }
-  if (S.dbState==="loading"){ list.innerHTML = `<div class="skel"></div><div class="skel"></div><div class="skel"></div><div class="skel"></div>`; return; }
-  if (!S.matches.length){ list.innerHTML = `<div class="empty"><h3>Sem jogos salvos para ${esc(dayLabel(S.date).toLowerCase())}</h3><p>A automação monta a agenda de hoje e de amanhã a cada execução.${S.meta?.triggerId ? " Toque em Atualizar para buscar agora." : ""}</p></div>`; return; }
+  if (S.dbState==="off"){ list.__html = `<div class="empty"><h3>Sem conexão com os dados</h3><p>Abra esta página no claude.ai, com sua conta, para ver os placares salvos pela automação.</p></div>`; return; }
+  if (S.dbState==="loading"){ list.__html = `<div class="skel"></div><div class="skel"></div><div class="skel"></div><div class="skel"></div>`; return; }
+  if (!S.matches.length){ list.__html = `<div class="empty"><h3>Sem jogos salvos para ${esc(dayLabel(S.date).toLowerCase())}</h3><p>A automação monta a agenda de hoje e de amanhã a cada execução.${S.meta?.triggerId ? " Toque em Atualizar para buscar agora." : ""}</p></div>`; return; }
   const ms = filtered();
-  if (!ms.length){ list.innerHTML = `<div class="empty"><h3>Nada neste filtro</h3><p>Troque o filtro ou limpe a busca.</p></div>`; return; }
+  if (!ms.length){ list.__html = `<div class="empty"><h3>Nada neste filtro</h3><p>Troque o filtro ou limpe a busca.</p></div>`; return; }
   const groups = {};
   for (const m of ms) (groups[m.compKey] ||= {name:m.comp, items:[]}).items.push(m);
   const keys = Object.keys(groups).sort((a,b)=>{ const ia=COMP_ORDER.indexOf(a), ib=COMP_ORDER.indexOf(b); return (ia<0?99:ia)-(ib<0?99:ib) || a.localeCompare(b); });
@@ -765,7 +791,7 @@ function renderList(){
     }
     h += `</section>`; gi++;
   }
-  list.innerHTML = h;
+  list.__html = h;
   S.firstPaint = false;
 }
 
@@ -933,7 +959,7 @@ function renderSheet(anim){
     if (mobile){ sh.hidden = true; $("#scrim").hidden = true; return; }
     sh.hidden = false;
     const live = S.matches.filter(x=>effStatus(x)==="live").length;
-    sh.innerHTML = `<div class="idle"><div class="radar"><i style="top:30%;left:62%"></i><i style="top:64%;left:28%;animation:none;opacity:.6"></i></div><h3>Central da partida</h3><p class="hint">Escolha um jogo para ver placar, lances, estatísticas, escalação em campo e onde assistir.</p>${live?`<p class="hint"><b style="color:var(--live)">${live}</b> jogo${live>1?"s":""} rolando agora.</p>`:""}</div>`;
+    sh.__html = `<div class="idle"><div class="radar"><i style="top:30%;left:62%"></i><i style="top:64%;left:28%;animation:none;opacity:.6"></i></div><h3>Central da partida</h3><p class="hint">Escolha um jogo para ver placar, lances, estatísticas, escalação em campo e onde assistir.</p>${live?`<p class="hint"><b style="color:var(--live)">${live}</b> jogo${live>1?"s":""} rolando agora.</p>`:""}</div>`;
     return;
   }
   sh.hidden = false; $("#scrim").hidden = !mobile;
@@ -945,7 +971,7 @@ function renderSheet(anim){
   const tabs = [["resumo","Resumo"],...(hasComm?[["lances","Lances"]]:[]),["stats","Números"],["lineups","Escalação"],["info","Info"]];
   if (S.tab==="lances" && !hasComm) S.tab = "resumo";
   const body = S.tab==="stats"?tabStats(m):S.tab==="lineups"?tabLineups(m):S.tab==="info"?tabInfo(m)+h2hHtml(m):S.tab==="lances"?tabLances(m):tabResumo(m);
-  sh.innerHTML = `<div class="sheet-h"><div class="meta">${leagueLogo(m.compKey, 22)}${esc(m.comp)}${m.round?` · ${esc(m.round)}`:""}</div><button class="close" id="close" aria-label="Fechar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+  sh.__html = `<div class="sheet-h"><div class="meta">${leagueLogo(m.compKey, 22)}${esc(m.comp)}${m.round?` · ${esc(m.round)}`:""}</div><button class="close" id="close" aria-label="Fechar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
     <div class="board"><div class="side" data-team="${esc(m.home)}" role="button" tabindex="0" style="cursor:pointer">${crest(m.home,64)}<b>${esc(m.home)}</b></div>
       <div class="mid"><div class="big ${st==="live"?"live":""}">${has?`<span class="d">${m.hs}</span><span class="sep">:</span><span class="d" style="animation-delay:.08s">${m.as}</span>`:`<span style="color:var(--dim)">VS</span>`}</div>${mid}</div>
       <div class="side" data-team="${esc(m.away)}" role="button" tabindex="0" style="cursor:pointer">${crest(m.away,64)}<b>${esc(m.away)}</b></div></div></div>
@@ -1010,7 +1036,7 @@ function projectTable(key, t){
 }
 function renderTable(){
   const v = $("#view-tabela"), keys = tableKeys();
-  if (!keys.length){ v.innerHTML = `<div class="empty" style="margin-top:18px"><h3>Tabelas ainda não carregadas</h3><p>A automação salva a classificação dos campeonatos a cada execução.</p></div>`; return; }
+  if (!keys.length){ v.__html = `<div class="empty" style="margin-top:18px"><h3>Tabelas ainda não carregadas</h3><p>A automação salva a classificação dos campeonatos a cada execução.</p></div>`; return; }
   if (!keys.includes(S.tableKey)) S.tableKey = keys[0];
   const key = S.tableKey, t0 = S.tables[key], zones = zonesFor(key, t0);
   const proj = projectTable(key, t0), t = proj.t;
@@ -1024,7 +1050,7 @@ function renderTable(){
     return `<tr style="animation-delay:${i*22}ms"><td class="pos" style="--zc:${zc(r.pos)}">${r.pos}${r._mv?`<i class="mv ${r._mv>0?"up":"dn"}">${r._mv>0?"▲":"▼"}${Math.abs(r._mv)}</i>`:""}</td><td class="club"><div data-team="${esc(r.team)}" role="button" tabindex="0" style="cursor:pointer">${crest(r.team,22)}<span>${esc(r.team)}</span>${r._live?`<span class="live-tag">${esc(r._live)}</span>`:playing.has(nrm(r.team))?`<span class="today-tag">hoje</span>`:""}</div></td><td class="p">${r.pts}</td><td>${num(j)}</td><td>${num(r.v)}</td><td>${num(r.e)}</td><td>${num(r.d)}</td><td>${num(r.gp)}</td><td>${num(r.gc)}</td><td>${sg==null?"—":(sg>0?"+":"")+sg}</td></tr>`; }).join("")}
   </tbody></table></div>`;
   const body = Array.isArray(t.groups) && t.groups.length ? `<div class="grps">${t.groups.map(g => `<div>${tableHtml(g.rows, g.name)}</div>`).join("")}</div>` : tableHtml(t.rows);
-  v.innerHTML = `${tabs}${proj.n?`<div class="livebar"><span class="pulse"></span><b>TABELA AO VIVO</b><span>${proj.n} jogo${proj.n>1?"s":""} em andamento ou recém-terminado${proj.n>1?"s":""} somado${proj.n>1?"s":""} · setas mostram quem sobe e desce</span><button class="chip" data-proj="${S.noProj?"on":"off"}">${S.noProj?"Ver ao vivo":"Ver oficial"}</button></div>`:""}<div class="st-head"><h2 style="display:flex;align-items:center;gap:12px">${leagueLogo(key, 38)}${esc(t.name||ST_NAME[key]||key)}</h2><span class="mono">${when}${t.source?` · ${esc(t.source)}`:""}</span></div>
+  v.__html = `${tabs}${proj.n?`<div class="livebar"><span class="pulse"></span><b>TABELA AO VIVO</b><span>${proj.n} jogo${proj.n>1?"s":""} em andamento ou recém-terminado${proj.n>1?"s":""} somado${proj.n>1?"s":""} · setas mostram quem sobe e desce</span><button class="chip" data-proj="${S.noProj?"on":"off"}">${S.noProj?"Ver ao vivo":"Ver oficial"}</button></div>`:""}<div class="st-head"><h2 style="display:flex;align-items:center;gap:12px">${leagueLogo(key, 38)}${esc(t.name||ST_NAME[key]||key)}</h2><span class="mono">${when}${t.source?` · ${esc(t.source)}`:""}</span></div>
   ${body}
   <div class="legend">${zones.map(z=>`<span><i style="background:${z.color}"></i>${esc(z.label)} (${z.from===z.to?z.from+"º":z.from+"º–"+z.to+"º"})</span>`).join("")}</div>
   ${["epl","laliga","seriea","bundesliga","ligue1"].includes(key)?`<p class="hint" style="font-size:12px">As vagas europeias podem mudar conforme os campeões das copas nacionais.</p>`:""}`;
@@ -1148,11 +1174,11 @@ const tabsHtml = (keys, sel, attr) => `<div class="st-tabs" role="tablist">${key
 S.scorers = {}; S.scKey = store.get("scKey", null);
 function renderScorers(){
   const v = $("#view-artilharia"), keys = keysIn(S.scorers, ST_ORDER).filter(k => S.scorers[k]?.rows?.length);
-  if (!keys.length){ v.innerHTML = `<div class="empty" style="margin-top:18px"><h3>Artilharia ainda não carregada</h3><p>A automação salva os artilheiros de cada campeonato uma vez por dia.</p></div>`; return; }
+  if (!keys.length){ v.__html = `<div class="empty" style="margin-top:18px"><h3>Artilharia ainda não carregada</h3><p>A automação salva os artilheiros de cada campeonato uma vez por dia.</p></div>`; return; }
   if (!keys.includes(S.scKey)) S.scKey = keys[0];
   const t = S.scorers[S.scKey], rows = t.rows, top = rows.slice(0,3), hasA = rows.some(r => r.assists != null);
   const pod = top.map((r,i) => `<div class="pod p${i+1}" data-team="${esc(r.team)}" role="button" tabindex="0"><div class="pos">${i+1}º</div>${avatar(r.player, r.team, 64)}<b>${esc(r.player)}</b><span class="tm">${crest(r.team,16)}${esc(r.team)}</span><div class="g"><strong>${r.goals}</strong> gols</div></div>`).join("");
-  v.innerHTML = `${tabsHtml(keys, S.scKey, "data-sc")}<div class="st-head"><h2 style="display:flex;align-items:center;gap:12px">${leagueLogo(S.scKey,38)}Artilharia · ${esc(ST_NAME[S.scKey]||t.name)}</h2><span class="mono">${t.asOf?`ATÉ ${esc(t.asOf)} · `:""}${esc(t.source||"")}</span></div>
+  v.__html = `${tabsHtml(keys, S.scKey, "data-sc")}<div class="st-head"><h2 style="display:flex;align-items:center;gap:12px">${leagueLogo(S.scKey,38)}Artilharia · ${esc(ST_NAME[S.scKey]||t.name)}</h2><span class="mono">${t.asOf?`ATÉ ${esc(t.asOf)} · `:""}${esc(t.source||"")}</span></div>
   <div class="podium">${pod}</div>
   <div class="st-wrap"><table class="stb sct"><thead><tr><th>#</th><th>Jogador</th><th>Clube</th><th>Gols</th>${hasA?"<th>Assist.</th>":""}</tr></thead><tbody>
   ${rows.map((r,i)=>`<tr style="animation-delay:${i*22}ms"><td class="pos">${r.pos}</td><td class="club"><div>${avatar(r.player, r.team, 26)}<span>${esc(r.player)}</span></div></td><td class="club"><div data-team="${esc(r.team)}" role="button" tabindex="0">${crest(r.team,20)}<span style="font-weight:500">${esc(r.team)}</span></div></td><td class="p">${r.goals}</td>${hasA?`<td>${r.assists ?? "—"}</td>`:""}</tr>`).join("")}
@@ -1179,13 +1205,13 @@ function tieCard(t, i){
 }
 function renderBrackets(){
   const v = $("#view-matamata"), keys = keysIn(S.brackets, BR_ORDER).filter(k => S.brackets[k]?.rounds?.length);
-  if (!keys.length){ v.innerHTML = `<div class="empty" style="margin-top:18px"><h3>Chaveamentos ainda não carregados</h3><p>A automação salva o mata-mata das copas quando há jogos.</p></div>`; return; }
+  if (!keys.length){ v.__html = `<div class="empty" style="margin-top:18px"><h3>Chaveamentos ainda não carregados</h3><p>A automação salva o mata-mata das copas quando há jogos.</p></div>`; return; }
   if (!keys.includes(S.brKey)) S.brKey = keys[0];
   const b = S.brackets[S.brKey];
   const last = b.rounds[b.rounds.length-1];
   const finalists = last.ties.length === 2 ? last.ties.map(t => t.winner || null) : [];
   const finalCard = b.final ? `<div class="round final"><h4>Final</h4><div class="tie fin">${finalists.length ? finalists.map((f,i)=>`<div class="tr">${f?crest(f,20):`<span class="crest q">?</span>`}<span class="nm">${esc(f || `Vencedor ${last.ties[i].a} × ${last.ties[i].b}`)}</span></div>`).join("") : ""}<div class="tmeta">${esc([b.final.format, b.final.date, b.final.venue].filter(Boolean).join(" · "))}</div><div class="trophy">🏆</div></div></div>` : "";
-  v.innerHTML = `${tabsHtml(keys, S.brKey, "data-br")}<div class="st-head"><h2 style="display:flex;align-items:center;gap:12px">${leagueLogo(S.brKey,38)}${esc(b.name)}</h2><span class="mono">${b.updatedAt?`SYNC ${fmtTime.format(new Date(b.updatedAt))} · `:""}${esc(b.source||"")}</span></div>
+  v.__html = `${tabsHtml(keys, S.brKey, "data-br")}<div class="st-head"><h2 style="display:flex;align-items:center;gap:12px">${leagueLogo(S.brKey,38)}${esc(b.name)}</h2><span class="mono">${b.updatedAt?`SYNC ${fmtTime.format(new Date(b.updatedAt))} · `:""}${esc(b.source||"")}</span></div>
   <div class="bracket">${b.rounds.map(r => `<div class="round"><h4>${esc(r.name)}</h4><div class="ties">${r.ties.map(tieCard).join("")}</div></div>`).join("")}${finalCard}</div>
   <p class="hint" style="font-size:12px">Placar à direita: agregado (ou o jogo de ida, quando só ele foi disputado). Toque num time para abrir a página dele.</p>`;
 }
@@ -1213,7 +1239,7 @@ async function loadAgenda(){
 }
 function renderAgenda(){
   const v = $("#view-agenda");
-  if (!S.agenda){ v.innerHTML = `<div class="skel" style="margin-top:18px"></div><div class="skel"></div><div class="skel"></div>`; return; }
+  if (!S.agenda){ v.__html = `<div class="skel" style="margin-top:18px"></div><div class="skel"></div><div class="skel"></div>`; return; }
   const keys = ["all", ...keysIn(Object.fromEntries(S.agenda.map(m => [m.compKey,1])), COMP_ORDER)];
   if (!keys.includes(S.agKey)) S.agKey = "all";
   S.agDays ||= store.get("agDays", 30);
@@ -1222,7 +1248,7 @@ function renderAgenda(){
   const byDay = {}; ms.forEach(m => (byDay[m.date] ||= []).push(m));
   const days = Object.keys(byDay).sort();
   const chips = `<div class="st-tabs" role="tablist">${keys.map(k => `<button role="tab" data-ag="${k}" aria-selected="${k===S.agKey}">${k==="all"?`<span>Todos</span>`:`${leagueLogo(k,20)}<span>${esc(ST_NAME[k]||k)}</span>`}</button>`).join("")}</div>`;
-  v.innerHTML = `${chips}<div class="st-head"><h2>Próximos ${S.agDays} dias</h2><span class="rng">${[7,15,30].map(n=>`<button class="chip" data-agdays="${n}" aria-pressed="${S.agDays===n}">${n} dias</button>`).join("")}<span class="mono">${ms.length} jogos</span></span></div>
+  v.__html = `${chips}<div class="st-head"><h2>Próximos ${S.agDays} dias</h2><span class="rng">${[7,15,30].map(n=>`<button class="chip" data-agdays="${n}" aria-pressed="${S.agDays===n}">${n} dias</button>`).join("")}<span class="mono">${ms.length} jogos</span></span></div>
   ${days.length ? days.map(d => { const dt = new Date(d+"T12:00:00Z");
     return `<section class="comp ag"><div class="comp-h"><h3>${esc(dayLabel(d))} · ${dt.toLocaleDateString("pt-BR",{day:"2-digit",month:"2-digit",timeZone:"UTC"})}</h3><span class="cnt">${byDay[d].length} jogos</span></div>
     ${byDay[d].map(m => `<div class="row agr" role="button" tabindex="0" data-agopen="${esc(m.id)}" data-agdate="${m.date}">
@@ -1279,7 +1305,7 @@ function renderTeam(){
   let squad = t.roster;
   if (!squad && PL){ const tk = crestKey(name); if (tk && PL.names) squad = Object.keys(PL.names).filter(k => k.startsWith(tk + "|")).map(k => ({name: PL.names[k]})); }
   const mrow = m => `<div class="tm-m" data-agopen="${esc(m.id)}" data-agdate="${m.date}" role="button" tabindex="0"><span class="d mono">${new Date(m.kickoff).toLocaleDateString("pt-BR",{day:"2-digit",month:"2-digit",timeZone:TZ})}</span>${leagueLogo(m.compKey,16)}<span class="vs">${crest(m.home,18)}<span>${esc(m.home)}</span><b class="mono">${m.status==="final"||m.status==="live"?`${m.hs} × ${m.as}`:kick(m)}</b><span>${esc(m.away)}</span>${crest(m.away,18)}</span>${m.status==="final"?`<i class="form-dot ${res(m)}">${res(m)}</i>`:""}${m.tv?.length&&m.status!=="final"?`<em>${esc(m.tv[0])}</em>`:""}</div>`;
-  box.innerHTML = `<div class="tp-in"><button class="close tp-close" id="tp-close" aria-label="Fechar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+  box.__html = `<div class="tp-in"><button class="close tp-close" id="tp-close" aria-label="Fechar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
     <div class="tp-head">${crest(name, 88)}<div><h2>${esc(name)}</h2>
       <div class="tp-sub">${tbl ? `${leagueLogo(tbl,20)}<span>${row.pos}º no ${esc(ST_NAME[tbl]||tbl)} · ${row.pts} pts${row.j!=null?` · ${row.j} jogos`:""}</span>` : `<span>Clube</span>`}</div>
       ${form.length?`<div class="form" style="margin-top:8px">${form.map(r=>`<i class="${r}">${r}</i>`).join("")}</div>`:""}</div>
