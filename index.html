@@ -427,6 +427,8 @@ table.stb td.pos .mv{display:block;font-style:normal;font-size:9.5px;line-height
 .h2h-r b{font-size:12px;padding:2px 6px;border-radius:5px;background:rgba(255,255,255,.05)}
 .h2h-r em{grid-column:2/-1;font-style:normal;font-family:var(--f-mono);font-size:9.5px;color:var(--dim);margin-top:-4px}
 .h2h .sec-t{margin:0 0 4px;font-family:var(--f-mono);font-size:10.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--cyan);font-weight:500}
+.snd{padding:7px 9px}.snd svg{width:16px;height:16px}.snd .off{display:none}.snd.muted .on{display:none}.snd.muted .off{display:block}.snd.muted{opacity:.6;color:var(--live)}
+.rng{display:flex;align-items:center;gap:6px;flex-wrap:wrap}.rng .chip{padding:4px 10px;font-size:11.5px}.rng .mono{margin-left:6px}
 @media (prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important}}
 </style>
 </head>
@@ -465,6 +467,7 @@ table.stb td.pos .mv{display:block;font-style:normal;font-size:9.5px;line-height
         <div class="clock" aria-label="Hora de Brasília"><b>BRT</b> <span id="clock" class="mono">--:--:--</span></div>
         <div class="sync"><span class="dot" id="sync-dot"></span><span class="lbl" id="sync-lbl">Conectando…</span></div>
         <button class="btn" id="install" type="button" hidden><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="M7 10l5 5 5-5"/><path d="M5 21h14"/></svg><span>Instalar</span></button>
+        <button class="btn snd" id="mute" type="button" aria-pressed="false" title="Som dos avisos"><svg class="on" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5 6 9H2v6h4l5 4z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M19 5a10 10 0 0 1 0 14"/></svg><svg class="off" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5 6 9H2v6h4l5 4z"/><path d="m22 9-6 6"/><path d="m16 9 6 6"/></svg></button>
         <button class="btn bell" id="bell" type="button" data-mode="fav"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8a6 6 0 1 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg><span>Fav</span></button>
         <button class="btn" id="refresh" type="button" hidden><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 4v7h-7"/></svg><span>Atualizar</span></button>
       </div>
@@ -663,11 +666,12 @@ const kick = m => fmtTime.format(new Date(m.kickoff));
 function tickClock(){ $("#clock").textContent = fmtClock.format(new Date()); }
 function renderDays(){
   const t = todayKey(); let h = "";
-  for (let i=-2;i<=4;i++){
+  for (let i=-3;i<=30;i++){
     const k = shiftDay(t,i), d = new Date(k+"T12:00:00Z");
     h += `<button class="day" data-day="${k}" aria-pressed="${k===S.date}"><small>${esc(dayLabel(k))}</small><b>${String(d.getUTCDate()).padStart(2,"0")}.${String(d.getUTCMonth()+1).padStart(2,"0")}</b></button>`;
   }
   $("#days").innerHTML = h;
+  const on = $("#days [aria-pressed=\"true\"]"); if (on && renderDays.last !== S.date){ renderDays.last = S.date; on.scrollIntoView({block:"nearest", inline:"center", behavior:"auto"}); }
 }
 function renderTicker(){
   const live = S.matches.filter(m => effStatus(m)==="live");
@@ -1032,7 +1036,19 @@ $("#refresh").addEventListener("click", refreshNow);
 const ALERT_TXT = {off:"Avisos desligados", fav:"Avisos: só favoritos", all:"Avisos: todos os gols"};
 S.alertMode = store.get("alerts", "fav");
 let AC = null;
+S.sound = store.get("sound", true);
+function renderMute(){
+  const b = $("#mute"); if (!b) return;
+  b.setAttribute("aria-pressed", !S.sound); b.classList.toggle("muted", !S.sound);
+  const t = S.sound ? "Som ligado (toque para silenciar)" : "Som desligado (toque para ligar)"; b.title = t; b.setAttribute("aria-label", t);
+}
+function toggleMute(){
+  S.sound = !S.sound; store.set("sound", S.sound); renderMute();
+  toast(S.sound ? "🔊 Som dos gols ligado" : "🔇 Som dos gols desligado — os avisos continuam na tela");
+  if (S.sound){ try { AC ||= new (window.AudioContext || window.webkitAudioContext)(); if (AC.state === "suspended") AC.resume(); } catch(e){} beep(); }
+}
 function beep(){
+  if (!S.sound) return;
   try {
     AC ||= new (window.AudioContext || window.webkitAudioContext)();
     const t = AC.currentTime;
@@ -1067,7 +1083,7 @@ function onGoal(m, prevTotal){
   if (S.alertMode === "all" || fav){
     toast(`GOL! ${txt}${who}`); beep();
     if ("Notification" in window && Notification.permission === "granted"){
-      try { new Notification(`GOL! ${txt}`, {body: `${m.comp}${who}`, tag: m.id + "-" + m.hs + "-" + m.as}); } catch(e){}
+      try { new Notification(`GOL! ${txt}`, {body: `${m.comp}${who}`, tag: m.id + "-" + m.hs + "-" + m.as, silent: !S.sound}); } catch(e){}
     }
   } else toast(`GOL! ${txt}`);
 }
@@ -1133,12 +1149,12 @@ function renderBrackets(){
 /* ---------- agenda (next 7 days) ---------- */
 S.agKey = "all"; S.agenda = null;
 async function loadAgenda(){
-  const today = todayKey(), end = shiftDay(today, 6);
+  const today = todayKey(), end = shiftDay(today, 29);
   let list = [];
   if (S.standalone){
     list = (window.__SNAPSHOT?.matches || []).filter(m => m.date >= today && m.date <= end);
     const span = today.replace(/-/g,"") + "-" + end.replace(/-/g,"");
-    const res = await Promise.all(LEAGUES.map(([slug,key,comp]) => fetch(`${ESPN}${slug}/scoreboard?dates=${span}&limit=200`).then(r=>r.ok?r.json():null).then(j => (j?.events||[]).map(e => LIVE.conv(e, slug, key, comp))).catch(()=>[])));
+    const res = await Promise.all(LEAGUES.map(([slug,key,comp]) => fetch(`${ESPN}${slug}/scoreboard?dates=${span}&limit=500&lang=pt&region=br`).then(r=>r.ok?r.json():null).then(j => (j?.events||[]).map(e => LIVE.conv(e, slug, key, comp))).catch(()=>[])));
     for (const L of res.flat().filter(Boolean)){
       if (L.date < today || L.date > end) continue;
       const ex = list.find(x => x.date === L.date && sameTeam(x.home, L.home) && sameTeam(x.away, L.away));
@@ -1156,11 +1172,13 @@ function renderAgenda(){
   if (!S.agenda){ v.innerHTML = `<div class="skel" style="margin-top:18px"></div><div class="skel"></div><div class="skel"></div>`; return; }
   const keys = ["all", ...keysIn(Object.fromEntries(S.agenda.map(m => [m.compKey,1])), COMP_ORDER)];
   if (!keys.includes(S.agKey)) S.agKey = "all";
-  const ms = S.agenda.filter(m => S.agKey === "all" || m.compKey === S.agKey);
+  S.agDays ||= store.get("agDays", 30);
+  const lim = shiftDay(todayKey(), S.agDays - 1);
+  const ms = S.agenda.filter(m => (S.agKey === "all" || m.compKey === S.agKey) && m.date <= lim);
   const byDay = {}; ms.forEach(m => (byDay[m.date] ||= []).push(m));
   const days = Object.keys(byDay).sort();
   const chips = `<div class="st-tabs" role="tablist">${keys.map(k => `<button role="tab" data-ag="${k}" aria-selected="${k===S.agKey}">${k==="all"?`<span>Todos</span>`:`${leagueLogo(k,20)}<span>${esc(ST_NAME[k]||k)}</span>`}</button>`).join("")}</div>`;
-  v.innerHTML = `${chips}<div class="st-head"><h2>Próximos 7 dias</h2><span class="mono">${ms.length} jogos</span></div>
+  v.innerHTML = `${chips}<div class="st-head"><h2>Próximos ${S.agDays} dias</h2><span class="rng">${[7,15,30].map(n=>`<button class="chip" data-agdays="${n}" aria-pressed="${S.agDays===n}">${n} dias</button>`).join("")}<span class="mono">${ms.length} jogos</span></span></div>
   ${days.length ? days.map(d => { const dt = new Date(d+"T12:00:00Z");
     return `<section class="comp ag"><div class="comp-h"><h3>${esc(dayLabel(d))} · ${dt.toLocaleDateString("pt-BR",{day:"2-digit",month:"2-digit",timeZone:"UTC"})}</h3><span class="cnt">${byDay[d].length} jogos</span></div>
     ${byDay[d].map(m => `<div class="row agr" role="button" tabindex="0" data-agopen="${esc(m.id)}" data-agdate="${m.date}">
@@ -1169,7 +1187,7 @@ function renderAgenda(){
       ${m.tv?.length?`<div class="tv">${m.tv.slice(0,3).map(t=>`<i>${esc(t)}</i>`).join("")}</div>`:""}</div>
       <div class="score ${m.status==="live"?"live":m.hs!=null?"fin":"pend"}"><span>${m.hs ?? "-"}</span><span>${m.as ?? "-"}</span></div>
       <span style="display:grid;place-items:center">${leagueLogo(m.compKey,22)}</span></div>`).join("")}</section>`; }).join("")
-  : `<div class="empty"><h3>Nenhum jogo encontrado</h3><p>A automação monta a agenda dos próximos dias toda manhã.</p></div>`}`;
+  : `<div class="empty"><h3>Nenhum jogo encontrado</h3><p>A automação monta a agenda do mês toda manhã.</p></div>`}`;
 }
 
 /* ---------- team page ---------- */
@@ -1236,6 +1254,7 @@ document.addEventListener("click", e => {
   const tm = e.target.closest("[data-team]"); if (tm && !e.target.closest(".row")){ openTeam(tm.dataset.team); return; }
   const sc = e.target.closest("[data-sc]"); if (sc){ S.scKey = sc.dataset.sc; store.set("scKey", S.scKey); renderScorers(); return; }
   const br = e.target.closest("[data-br]"); if (br){ S.brKey = br.dataset.br; store.set("brKey", S.brKey); renderBrackets(); return; }
+  const agd = e.target.closest("[data-agdays]"); if (agd){ S.agDays = +agd.dataset.agdays; store.set("agDays", S.agDays); renderAgenda(); return; }
   const agk = e.target.closest("[data-ag]"); if (agk){ S.agKey = agk.dataset.ag; renderAgenda(); return; }
 }, true);
 document.addEventListener("keydown", e => {
@@ -1244,6 +1263,7 @@ document.addEventListener("keydown", e => {
 });
 
 $("#bell").addEventListener("click", cycleBell);
+$("#mute").addEventListener("click", toggleMute); renderMute();
 
 function setView(v){
   S.view = v;
