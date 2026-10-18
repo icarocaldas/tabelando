@@ -1603,8 +1603,8 @@ async function openShare(m){
   const cards = [["Placar", await cardScore(m)], ["Escalação", await cardLineup(m)]].filter(x => x[1]);
   const items = cards.map(([lab, cv], i) => ({lab, url: cv.toDataURL("image/png"), cv, i}));
   S.shareCards = items;
-  box.querySelector(".sb-grid").innerHTML = items.map(it => `<figure><img src="${it.url}" alt="Card ${esc(it.lab)}"><figcaption><b>${esc(it.lab)}</b><span><button class="btn" data-sbshare="${it.i}">Enviar</button><a class="btn" download="tabelando-${esc(it.lab.toLowerCase())}.png" href="${it.url}">Baixar</a></span></figcaption></figure>`).join("")
-    + `<p class="hint" style="grid-column:1/-1">No celular, “Enviar” abre o WhatsApp e outros apps. Se não abrir, segure a imagem para salvar.</p>`;
+  box.querySelector(".sb-grid").innerHTML = items.map(it => `<figure><img src="${it.url}" alt="Card ${esc(it.lab)}"><figcaption><b>${esc(it.lab)}</b><span>${onSite() || navigator.canShare ? `<button class="btn" data-sbshare="${it.i}">Enviar</button>` : ""}${onSite() ? `<a class="btn" download="tabelando-${esc(it.lab.toLowerCase())}.png" href="${it.url}">Baixar</a>` : ""}</span></figcaption></figure>`).join("")
+    + `<p class="hint" style="grid-column:1/-1">${onSite() ? "No celular, “Enviar” abre o WhatsApp e outros apps. Se não abrir, segure a imagem para salvar." : "Segure (ou clique com o botão direito) na imagem para salvar e mandar no WhatsApp. No site, o botão Enviar abre o WhatsApp direto."}</p>`;
 }
 async function shareCard(i){
   const it = S.shareCards?.[i]; if (!it) return;
