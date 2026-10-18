@@ -786,7 +786,7 @@ function tabLances(m){
   if (!c.length) return `<div class="empty" style="margin:6px 0"><h3>${m.espnId?"Carregando narração…":"Sem narração"}</h3><p>${effStatus(m)==="scheduled"?"A narração lance a lance começa quando a bola rolar.":"A fonte ainda não publicou os lances deste jogo."}</p></div>`;
   const ic = {goal:"⚽", yellow:"🟨", red:"🟥", sub:"🔁", var:"📺", whistle:"⏱️"};
   return `<ol class="comm">${c.map((x,i)=>`<li class="${x.kind||""}" style="animation-delay:${Math.min(i*18,400)}ms"><span class="cm mono">${esc(x.min||"")}</span><span class="ci">${ic[x.kind]||"·"}</span><p>${esc(x.text)}</p></li>`).join("")}</ol>
-  <p class="hint" style="font-size:11.5px;margin-top:10px">Narração: ESPN · atualiza a cada 30 s durante o jogo.</p>`;
+  <p class="hint" style="font-size:11.5px;margin-top:10px">Narração: ESPN · atualiza a cada ~10 s durante o jogo.</p>`;
 }
 function h2hHtml(m){
   const g = m.h2h || [];
@@ -991,7 +991,7 @@ function renderSync(){
     dot.className = "dot "+(age<75?"ok":"old");
     lbl.textContent = `SYNC ${fmtTime.format(new Date(m.updatedAt))}` + (m.nextRun ? ` · PRÓX ${fmtTime.format(new Date(m.nextRun))}` : ""); }
   if (S.standalone){
-    if (LIVE.ok){ dot.className = "dot ok"; lbl.textContent = `AO VIVO · ${fmtClock.format(new Date(LIVE.ok))} · A CADA 30S`; }
+    if (LIVE.ok){ dot.className = "dot ok"; lbl.textContent = `AO VIVO · ${fmtClock.format(new Date(LIVE.ok))} · A CADA ${Math.round((LIVE.every||30000)/1000)}S`; }
     else if (LIVE.err){ dot.className = "dot old"; lbl.textContent = "SEM CONEXÃO AO VIVO · DADOS SALVOS"; }
     else { dot.className = "dot"; lbl.textContent = "CONECTANDO AO VIVO…"; }
   }
@@ -1320,21 +1320,46 @@ function sameTeam(a, b){ const ka = teamKey(a), kb = teamKey(b); if (ka && kb &&
 const scv = s => s && typeof s === "object" ? (+s.value || +s.displayValue || 0) : (+s || 0);
 const LIVE = {
   data: {}, timer: null, ok: 0, err: 0, sum: {}, busy: false,
+  FAST: 6000, SLOW: 30000,
+  hot(){
+    // leagues with a game live, about to start (10 min) or just past kickoff without a final yet
+    const now = Date.now(), set = new Set();
+    for (const m of S.matches){
+      const st = m.status, k = Date.parse(m.kickoff);
+      if (st === "live" || (st === "scheduled" && k - now < 10*60000 && now - k < 3*3600000)){
+        const slug = m.slug || (LEAGUES.find(l => l[1] === m.compKey) || [])[0]; if (slug) set.add(slug);
+      }
+    }
+    return set;
+  },
   start(){
     clearTimeout(this.timer);
-    if (!this.stBoot){ this.stBoot = true; ST_ORDER.forEach(k => this.standings(k)); }
-    const go = async () => { await this.poll(); if (S.date === todayKey()) this.timer = setTimeout(go, 30000); };
-    go();
+    if (!this.stBoot){ this.stBoot = true; ST_ORDER.forEach(k => this.standings(k));
+      document.addEventListener("visibilitychange", () => { if (!document.hidden && this.go){ clearTimeout(this.timer); this.go(); } });
+      addEventListener("online", () => { if (this.go){ clearTimeout(this.timer); this.go(); } }); }
+    this.lastFull = 0;
+    this.go = async () => {
+      const hot = this.hot(), full = !hot.size || Date.now() - this.lastFull > 60000;
+      await this.poll(full ? null : hot);
+      if (full) this.lastFull = Date.now();
+      this.every = this.hot().size ? this.FAST : this.SLOW;
+      if (S.date === todayKey()) this.timer = setTimeout(this.go, this.every);
+    };
+    this.go();
   },
-  async poll(){
+  async poll(only){
     if (this.busy) return; this.busy = true;
-    const d = S.date.replace(/-/g,""), date = S.date;
-    const res = await Promise.all(LEAGUES.map(([slug, key, comp]) =>
-      fetch(`${ESPN}${slug}/scoreboard?dates=${d}&lang=pt&region=br`).then(r => r.ok ? r.json() : null).then(j => j && j.events ? j.events.map(e => this.conv(e, slug, key, comp)) : []).catch(() => null)));
+    const d = S.date.replace(/-/g,""), date = S.date, t = Math.floor(Date.now() / 5000);
+    const list = only ? LEAGUES.filter(l => only.has(l[0])) : LEAGUES;
+    const res = await Promise.all(list.map(([slug, key, comp]) =>
+      fetch(`${ESPN}${slug}/scoreboard?dates=${d}&lang=pt&region=br&_=${t}`, {cache: "no-store"}).then(r => r.ok ? r.json() : null).then(j => j && j.events ? j.events.map(e => this.conv(e, slug, key, comp)) : []).catch(() => null)));
     this.busy = false;
     if (date !== S.date) return;
     if (res.every(r => r === null)){ this.err = Date.now(); renderSync(); return; }
-    this.data[date] = res.flat().filter(Boolean).filter(m => m && m.date === date);
+    const fresh = res.flat().filter(Boolean).filter(m => m && m.date === date);
+    if (only){ const okSlugs = new Set(list.filter((l, i) => res[i] !== null).map(l => l[0]));
+      this.data[date] = (this.data[date] || []).filter(m => !okSlugs.has(m.slug)).concat(fresh); }
+    else this.data[date] = fresh;
     this.ok = Date.now();
     applyLive();
     if (S.sel) { const m = S.matches.find(x => x.id === S.sel); if (m && m.status === "live") this.summary(S.sel, true); }
@@ -1376,9 +1401,9 @@ const LIVE = {
   },
   async summary(id, quiet){
     const m = S.matches.find(x => x.id === id); if (!m || !m.espnId) return;
-    const last = this.sum[m.espnId]; if (last && Date.now() - last.t < 25000) return;
+    const last = this.sum[m.espnId]; if (last && Date.now() - last.t < 9000) return;
     try {
-      const j = await fetch(`${ESPN}${m.slug}/summary?event=${m.espnId}&lang=pt&region=br`).then(r => r.json());
+      const j = await fetch(`${ESPN}${m.slug}/summary?event=${m.espnId}&lang=pt&region=br&_=${Math.floor(Date.now()/5000)}`, {cache: "no-store"}).then(r => r.json());
       const teams = j.boxscore?.teams || [];
       const byHome = t => (t.homeAway ? t.homeAway === "home" : sameTeam(t.team?.displayName || "", m.home));
       const th = teams.find(byHome), ta = teams.find(t => t !== th);
